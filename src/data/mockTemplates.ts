@@ -197,13 +197,13 @@ int handleSensorInput(int sensorValue, LogCallback logger) {
         payload = data["payload"]
         
         # Node 5: 수치 형변환 시도 및 예외 분기
-        try {
+        try:
             numeric_val = float(payload)
             if numeric_val < 0.0:
                 # Node 6: 음수 오류 노드
                 return {"status": "RANGE_ERROR", "value": numeric_val}
             return {"status": "SUCCESS", "parsed": numeric_val}
-        } except (ValueError, TypeError) as e:
+        except (ValueError, TypeError) as e:
             # Node 7: 포맷 컨버전 불일치 오류 노드
             return {"status": "TYPE_ERROR", "system_message": str(e)}
             

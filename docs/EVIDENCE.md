@@ -47,3 +47,36 @@
 
 ### 결과 / 스크린샷
 - (작성 예정)
+
+---
+
+## IMP-002: 정적 분석 리뷰 후속 버그 수정 (2026-08-05)
+
+- **상태**: 완료
+- **날짜**: 2026-08-05
+- **작성자**: opencode
+- **개선 목표**: 전체 코드 리뷰에서 발견된 결함을 수정하고 재현 가능한 검증 절차와 함께 증적을 남긴다.
+
+### 발견·수정 내역
+
+| 항목 | 심각도 | 수정 내용 |
+|------|--------|-----------|
+| `components/ui/field.tsx` `new Map(...).values()` 추론이 `unknown`으로 떨어져 `error.message`에 대한 TS2339 3건 | 높음 | Map 추론에 의존하지 않는 순수 dedupe 루프로 재작성 (`components/ui/field.tsx:188`) |
+| `App.tsx` auth gate의 조기 `return <AuthScreen/>` 이후 hooks 호출 → React Hooks 규칙 위반 (로그인/로그아웃 시 "Rendered more hooks than during the previous render" 크래시 유발) | 높음 | `App`(auth gate)과 `AppDashboard`(본체)로 컴포넌트 분리. 모든 hook이 `AppDashboard`에만 존재하도록 구조 변경 (`src/App.tsx`) |
+| `src/data/mockTemplates.ts` Python 템플릿에 `try { ... } catch (ValueError, TypeError) as e:` (C-style) 잘못된 문법 | 중간 | 정상 Python `try:/except (...):` 로 수정, `compile()` 문법 검증 통과 |
+| Edge Coverage(EC)를 `nc * 0.85`로 하드코딩 | 중간 | 양 끝 노드가 모두 `isCovered`인 에지를 실측 집계하도록 계산 (`src/App.tsx` stats memo) |
+| 헤더의 UTC Clock 정적 값 `2026-06-12` | 낮음 | 1분 주기 갱신되는 동적 UTC 날짜 표시로 변경 |
+
+### 검증 절차
+- [x] `npm run lint` (`tsc --noEmit`) → **TypeScript: No errors found**
+- [x] `npm run build` → 클라이언트(`dist/`) + 서버 번들(`dist/server.cjs`) 정상 생성
+- [x] 수정된 Python 템플릿 `compile()` 문법 검증
+
+### 변경 파일
+- `components/ui/field.tsx`
+- `src/App.tsx`
+- `src/data/mockTemplates.ts`
+- `docs/EVIDENCE.md`
+
+### 결과 / 스크린샷
+- 빌드 산출물: `dist/index-B4fc6KGK.css`, `dist/index-*.js`(gzip 284.65 kB), `dist/server.cjs` 생성

@@ -12,6 +12,7 @@ import { HistorySidebar, AnalysisSession } from "./components/HistorySidebar";
 import { WorkflowHUD } from "./components/WorkflowHUD";
 import { IntegrationConsultant } from "./components/IntegrationConsultant";
 import { MultiFileGitAnalyzer } from "./components/MultiFileGitAnalyzer";
+import { AuthScreen } from "./components/AuthScreen";
 
 import { 
   Network, 
@@ -27,11 +28,35 @@ import {
   AlertTriangle,
   Play,
   RefreshCcw,
-  History
+  History,
+  LogOut
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 export default function App() {
+  // 0. Auth gate state (demo, localStorage-backed)
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    return (
+      localStorage.getItem("node-coverage-auth") === "1" ||
+      sessionStorage.getItem("node-coverage-auth") === "1"
+    );
+  });
+
+  const handleLogin = () => setIsAuthenticated(true);
+  const handleLogout = () => {
+    localStorage.removeItem("node-coverage-auth");
+    sessionStorage.removeItem("node-coverage-auth");
+    setIsAuthenticated(false);
+  };
+
+  if (!isAuthenticated) {
+    return <AuthScreen onLogin={handleLogin} />;
+  }
+
+  return <AppDashboard onLogout={handleLogout} />;
+}
+
+function AppDashboard({ onLogout }: { onLogout: () => void }) {
   // 1. Core States
   const [selectedLanguage, setSelectedLanguage] = useState<SupportedLanguage>("javascript");
   const [requirements, setRequirements] = useState<string>("");
@@ -142,6 +167,13 @@ REQ-05: 안전 이체 내역 레지스트리 비휘발성 저장`,
 
   // 2. Local simulation timers
   const [simulationIntervalId, setSimulationIntervalId] = useState<NodeJS.Timeout | null>(null);
+
+  // Live UTC clock (refreshes every minute)
+  const [utcNow, setUtcNow] = useState<string>(() => new Date().toISOString().substring(0, 10));
+  useEffect(() => {
+    const timer = setInterval(() => setUtcNow(new Date().toISOString().substring(0, 10)), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   // 3. Load active template upon language change
   useEffect(() => {
@@ -473,8 +505,19 @@ REQ-05: 안전 이체 내역 레지스트리 비휘발성 저장`,
     // Node Coverage Percent
     const ncPercent = nodesCount > 0 ? Math.round((coveredNodesCount / nodesCount) * 100) : 0;
     
-    // Mock Edge Coverage based on Node state for demonstration fidelity
-    const ecPercent = ncPercent > 0 ? Math.round(ncPercent * 0.85) : 0;
+    // Edge Coverage: an edge is covered when both endpoint nodes are covered
+    const nodeById: Record<string, CFGNode> = {};
+    for (const n of analysisResults.nodes) {
+      nodeById[n.id] = n;
+    }
+    const coveredEdgesCount = analysisResults.edges.filter((e) => {
+      const source = nodeById[e.source];
+      const target = nodeById[e.target];
+      return !!source?.isCovered && !!target?.isCovered;
+    }).length;
+    const ecPercent = analysisResults.edges.length > 0
+      ? Math.round((coveredEdgesCount / analysisResults.edges.length) * 100)
+      : 0;
 
     return {
       nc: ncPercent,
@@ -525,9 +568,19 @@ REQ-05: 안전 이체 내역 레지스트리 비휘발성 저장`,
             <span>분석 이력 히스토리 ({sessions.length})</span>
           </button>
 
+          <button
+            id="logout-btn"
+            onClick={onLogout}
+            title="로그아웃"
+            className="flex items-center gap-2 px-3 py-1.5 bg-[#0c0c0c] border border-[#222]/80 hover:border-[#A1824A]/40 text-gray-400 text-[11px] font-sans font-bold rounded-xs cursor-pointer transition-all"
+          >
+            <LogOut className="w-4 h-4 text-[#A1824A]" />
+            <span className="hidden sm:inline">로그아웃</span>
+          </button>
+
           <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-[#0c0c0c] border border-[#222]/80 rounded-xs">
             <Clock className="w-4 h-4 text-[#A1824A]" />
-            <span>UTC Clock: 2026-06-12</span>
+            <span>UTC Clock: {utcNow}</span>
           </div>
 
           <div className="flex items-center gap-2 px-3 py-1.5 bg-[#0c0c0c] border border-[#222]/80 rounded-xs">
