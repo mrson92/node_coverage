@@ -1,0 +1,6 @@
+{
+  "name": "Node Coverage Analyzer",
+  "description": "제품 전 생애주기 통합형 프로그래밍 언어 다변화 노드 커버리지 분석 시스템",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
