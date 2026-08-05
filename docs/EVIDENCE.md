@@ -80,3 +80,66 @@
 
 ### 결과 / 스크린샷
 - 빌드 산출물: `dist/index-B4fc6KGK.css`, `dist/index-*.js`(gzip 284.65 kB), `dist/server.cjs` 생성
+
+---
+
+## IMP-003: shadcn UI 도입 및 로그인(Auth) 게이트 추가 (2026-08-05)
+
+- **상태**: 완료
+- **날짜**: 2026-08-05
+- **작성자**: opencode
+- **개선 목표**: shadcn/ui 기반 컴포넌트 기반을 정착시키고, 앱 진입 전 데모 로그인 화면을 추가한다.
+
+### 개선 내역
+
+| 항목 | 내용 |
+|------|------|
+| shadcn/ui 초기화 | `components.json`, `lib/utils.ts`(cn 유틸), `components/ui/*` 14종(button/card/input/field/dialog/alert/badge/checkbox/separator/spinner/input-group/label/textarea) 추가 |
+| 다크 테마 적용 | `src/index.css`에 shadcn 테마 변수 + `@custom-variant dark`, `index.html`을 `lang="ko" class="dark"` 및 `color-scheme: dark`로 설정. `@fontsource-variable/geist` 도입 |
+| 로그인인증 게이트 | `AuthScreen.tsx` 추가. `App`(인증 게이트) → `AppDashboard`(본체) 구조로 인증 분기. localStorage/sessionStorage 기반 데모 인증 (데모 계정 `demo@nodecov.io`/`demo1234`) |
+| 로그아웃 UI | 헤더에 로그아웃 버튼(`logout-btn`) 추가 (`AppDashboard`) |
+| 부수 개선 | `nginx` 커밋 대상 의존성 추가(`@base-ui/react`, `class-variance-authority`, `clsx`, `tailwind-merge`, `tw-animate-css`) |
+
+### 비고 (알려진 제약 → 백로그)
+- AuthScreen은 localStorage 평문/하드코딩 데모 계정을 쓰는 **데모 수준** 인증. 보안 강화는 백로그(백엔드 인증 연동) 참조.
+- 빌드 청크 크기 944.12 kB (gzip 284.65 kB) — 코드 스플리팅은 백로그 참조.
+
+### 검증 절차
+- [x] `npm run lint` (`tsc --noEmit`) → **TypeScript: No errors found**
+- [x] `npm run build` 정상 생성 확인 (파일 세트 추가 등록)
+
+### 변경 파일
+- `components.json`, `lib/utils.ts`, `components/ui/*`, `docs/TODO.md`, `opencode.json`
+- `src/components/AuthScreen.tsx`, `src/App.tsx`, `src/index.css`, `index.html`
+- `package.json`, `package-lock.json`
+- `docs/EVIDENCE.md`
+
+### 결과 / 스크린샷
+- 커밋: `151c23f` `feat: shadcn UI 컴포넌트 추가 및 다크 테마 적용` → `origin/main` 푸시 완료 (`a88a5c4..151c23f`)
+
+---
+
+## IMP-004: Podman/Docker 컨테이너라이제이션 지원 (2026-08-05)
+
+- **상태**: 완료
+- **날짜**: 2026-08-05
+- **작성자**: Antigravity
+- **개선 목표**: 애플리케이션을 Podman 또는 Docker 컨테이너 환경에서 안정적으로 빌드하고 구동할 수 있도록 지원한다.
+
+### 개선 내역
+
+| 항목 | 내용 |
+|------|------|
+| Dockerfile 추가 | 멀티스테이지 빌드를 통해 프론트엔드/백엔드 최적 컴파일 빌드 후, Node.js slim 환경에 배포. Git 저장소 분석을 위해 `git` 바이너리 설치 및 `.repo-cache` 폴더 권한 부여 |
+| compose.yaml 추가 | `podman compose` 또는 `docker compose`를 이용하여 손쉽게 컨테이너를 구동할 수 있도록 설정. 호스트의 `GEMINI_API_KEY` 환경 변수를 자동 매핑 |
+| PORT & HOST 바인딩 검증 | 백엔드 서버(`server.ts`)가 이미 `0.0.0.0:3000`으로 바인딩되어 있어, 컨테이너 포트 포워딩에 별도 코드 변경 불필요 확인 |
+
+### 검증 절차
+- [x] `npm run lint` 통과
+- [x] `podman build -t node-coverage-analyzer:latest .` 이미지 빌드 성공
+- [x] `podman compose up`을 통한 서비스 구동 및 `http://localhost:3000/api/health` 헬스체크 정상 동작 확인
+
+### 변경 파일
+- `Dockerfile` [NEW]
+- `compose.yaml` [NEW]
+- `docs/EVIDENCE.md`

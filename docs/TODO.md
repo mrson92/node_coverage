@@ -12,8 +12,7 @@
 
 ## 진행 중 (Current)
 
-- [ ] **미커밋 변경 사항 커밋**: `AuthScreen`(로그인 화면), shadcn 컴포넌트(`components/ui/*`), `components.json`, `lib/utils.ts`, `App.tsx` auth gate 반영. 단, 아래 Todo가 남아 있으면 커밋 전 결정 필요.
-  - 메모: `git status` 기준 미커밋 작업 트리 상태 (2026-08-05).
+- (없음)
 
 ---
 
@@ -30,4 +29,5 @@
 
 ## 완료 (Completed)
 
+- [x] **미커밋 변경 사항 커밋** — AuthScreen + shadcn UI 도입(IMP-003) 커밋 `151c23f` → `origin/main` 푸시 완료. (2026-08-05)
 - [x] **IMP-002: 정적 리뷰 후속 버그 수정** — `field.tsx` unknown 타입 에러, App.tsx Hooks 규칙 위반, Python 템플릿 문법, EC 실측, UTC Clock 동적화. `docs/EVIDENCE.md`의 IMP-002 참조. (2026-08-05)

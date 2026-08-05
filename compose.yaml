@@ -1,0 +1,14 @@
+services:
+  node-coverage-analyzer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: localhost/node-coverage-analyzer:latest
+    container_name: node-coverage-analyzer
+    ports:
+      - "3000:3000"
+    environment:
+      # Forward the host's GEMINI_API_KEY environment variable to the container
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - NODE_ENV=production
+    restart: unless-stopped
