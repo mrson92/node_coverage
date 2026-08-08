@@ -13,6 +13,8 @@ import { IntegrationConsultant } from "./components/IntegrationConsultant";
 import { MultiFileGitAnalyzer } from "./components/MultiFileGitAnalyzer";
 import { LocalFileUploader } from "./components/LocalFileUploader";
 import { AuthScreen } from "./components/AuthScreen";
+import { downloadJsonReport, downloadMarkdownReport } from "./utils/reportExport";
+import { ENGINE_LABEL } from "./constants";
 
 import {
   Network,
@@ -26,21 +28,25 @@ import {
   RefreshCcw,
   History,
   LogOut,
+  FileJson,
+  FileText,
 } from "lucide-react";
 
+const TOKEN_KEY = "node-coverage-token";
+
 export default function App() {
-  // 0. Auth gate state (demo, localStorage-backed)
+  // 0. Auth gate state (server-side session token)
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return (
-      localStorage.getItem("node-coverage-auth") === "1" ||
-      sessionStorage.getItem("node-coverage-auth") === "1"
+    return !!(
+      localStorage.getItem(TOKEN_KEY) ||
+      sessionStorage.getItem(TOKEN_KEY)
     );
   });
 
   const handleLogin = () => setIsAuthenticated(true);
   const handleLogout = () => {
-    localStorage.removeItem("node-coverage-auth");
-    sessionStorage.removeItem("node-coverage-auth");
+    localStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(TOKEN_KEY);
     setIsAuthenticated(false);
   };
 
@@ -87,6 +93,7 @@ function AppDashboard({ onLogout }: { onLogout: () => void }) {
     handleDeleteSession,
     handleClearAllSessions,
     handleSaveCurrentSession,
+    handleBatchAnalyzeCode,
   } = engine;
 
   return (
@@ -137,6 +144,49 @@ function AppDashboard({ onLogout }: { onLogout: () => void }) {
             <span className="hidden sm:inline">로그아웃</span>
           </button>
 
+          <div className="hidden md:flex items-center gap-1.5">
+            <button
+              id="export-json-btn"
+              onClick={() => {
+                if (!analysisResults) return;
+                downloadJsonReport({
+                  code,
+                  requirements,
+                  language: selectedLanguage,
+                  analysisResults,
+                  optimizationResult,
+                  stats,
+                });
+              }}
+              title="분석 리포트 JSON으로 내보내기"
+              disabled={!analysisResults}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#0c0c0c] border border-[#222]/80 hover:border-[#A1824A]/40 text-[#A1824A] text-[11px] font-bold rounded-xl cursor-pointer transition-all disabled:opacity-40"
+            >
+              <FileJson className="w-3.5 h-3.5" />
+              <span className="hidden lg:inline">JSON</span>
+            </button>
+            <button
+              id="export-markdown-btn"
+              onClick={() => {
+                if (!analysisResults) return;
+                downloadMarkdownReport({
+                  code,
+                  requirements,
+                  language: selectedLanguage,
+                  analysisResults,
+                  optimizationResult,
+                  stats,
+                });
+              }}
+              title="분석 리포트 Markdown으로 내보내기"
+              disabled={!analysisResults}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#0c0c0c] border border-[#222]/80 hover:border-[#A1824A]/40 text-[#A1824A] text-[11px] font-bold rounded-xl cursor-pointer transition-all disabled:opacity-40"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span className="hidden lg:inline">MD</span>
+            </button>
+          </div>
+
           <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-[#0c0c0c] border border-[#222]/80 rounded-xs">
             <Clock className="w-4 h-4 text-[#A1824A]" />
             <span>UTC Clock: {utcNow}</span>
@@ -144,7 +194,7 @@ function AppDashboard({ onLogout }: { onLogout: () => void }) {
 
           <div className="flex items-center gap-2 px-3 py-1.5 bg-[#0c0c0c] border border-[#222]/80 rounded-xs">
             <Cpu className="w-4 h-4 text-[#A1824A]" />
-            <span>Core v4.2 (Docker)</span>
+            <span>{ENGINE_LABEL}</span>
           </div>
         </div>
 
@@ -167,6 +217,8 @@ function AppDashboard({ onLogout }: { onLogout: () => void }) {
           <MultiFileGitAnalyzer
             currentLanguage={selectedLanguage}
             onLoadResolvedCode={handleExternalSource}
+            onBatchAnalyze={handleBatchAnalyzeCode}
+            isBatchAnalyzing={isAnalyzing}
           />
         </section>
 

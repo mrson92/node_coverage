@@ -14,6 +14,8 @@ Google AI Studio 어플리케이션으로, **서버 사이드 Gemini API** 기�
 - **인터랙티브 커버리지 시뮬레이터** — 노드 클릭/실행 시뮬레이션, 풀 테스트 스위트 애니메이션, 리셋
 - **AI 기반 에이전트 커버리지 최적화** — 미커버 노드의 심볼릭 제약(Symbolic Constraints), 테스트 입력, 단위 테스트 코드, AutoFix 제안
 - **실제 Git 저장소 연동** — 원격 저장소를 shallow-clone 하여 소스 트리 스캔 및 개별 파일 읽기
+- **저장소 배치(다중 파일) 통합 분석** — Git 저장소에서 여러 소스 파일을 선택해 단일 CFG/RTM로 병합 분석
+- **분석 결과 리포트 내보내기** — 현재 분석(CFG/RTM/커버리지/최적화)을 JSON·Markdown 파일로 다운로드
 - **분석 이력 관리** — `localStorage` 기반 세션 저장/로드 (최대 30개)
 - **언어별 고유 리스크 통찰**(소프트웨어 침식 분석) 제공
 
@@ -33,17 +35,27 @@ Google AI Studio 어플리케이션으로, **서버 사이드 Gemini API** 기�
 
 ## 아키텍처
 
-단일 **Express 서버**(`server.ts`)가 React 앱을 호스팅하면서 동시에 Gemini 기반 API와 Git 저장소 스캔을 제공합니다.
+단일 **Express 서버**(`server.ts` → `server/app.ts`)가 React 앱을 호스팅하면서 동시에 Gemini 기반 API와 Git 저장소 스캔을 제공합니다. 라우트(`server/routes/*`) / 서비스(`server/services/*`) layer로 분리되어 있으며, 타입 계약은 `src/types.ts` 단일 소스로 공유합니다.
 
 - **개발 모드** (`NODE_ENV !== "production"`): Express가 Vite 미들웨어를 마운트 → 파일 수정 시 FE/BE 모두 hot-reload
 - **프로덕션 모드** (`NODE_ENV=production`): `dist/`로 빌드된 정적 자산을 호스팅
+
+### 인증 (Server-side Session Auth)
+
+`/api/health`와 `/api/auth/*`를 제외한 모든 API는 `Authorization: Bearer <token>` 헤더가 필요합니다. `POST /api/auth/login`으로 HMAC-SHA256 서명 토큰을 발급받습니다.
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `/api/health` | 서버 헬스체크 |
+| POST | `/api/auth/login` | 자격 증명 검증 후 서명 토큰 발급 (데모: `demo@nodecov.io`/`demo1234`) |
+| GET | `/api/auth/me` | 베어러 토큰 유효성 확인, 사용자 정보 반환 |
 
 ### API 엔드포인트
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
-| GET | `/api/health` | 서버 헬스체크 |
 | POST | `/api/analyze` | 소스코드 CFG/노드/에지/RTM/복잡도 자동 추출 |
+| POST | `/api/analyze/batch` | Git 저장소 배치 분석 — 다중 소스 파일을 단일 CFG로 통합 추출 |
 | POST | `/api/optimize` | 미커버 노드의 에이전트 커버리지 최적화 |
 | POST | `/api/repo/scan` | 원격 Git 저장소 clone·스캔, 소스 파일 트리 반환 |
 | POST | `/api/repo/file` | 스캔한 저장소의 개별 소스 파일 읽기 |
@@ -100,13 +112,18 @@ npm start       # NODE_ENV=production 인 경우 정적 호스팅 모드로 실�
 ## 디렉토리 구조
 
 ```
+server.ts              # Express 부트스트랩 (dev/prod 호스팅, listen)
+server/app.ts          # 미들웨어/라우팅 구성, 인증 가드 마운트
+server/routes/         # analyze(batch 포함) / optimize / repo / auth
+server/services/       # gemini / repoClone / auth
 src/
 ├── components/        # UI 컴포넌트 (CFG 시각화, 커버리지 시뮬레이터, 최적화 등)
+├── hooks/             # useAnalysisEngine (상태/시뮬레이션/세션/API 통합)
 ├── data/              # fallbackResults / mockTemplates (API 미연결 시 데모 데이터)
+├── utils/             # languageDetection / reportExport
 ├── App.tsx            # 메인 대시보드
 ├── types.ts           # 공용 타입 (AnalysisResults, CFGNode, CFGEdge 등)
 └── index.css
-server.ts              # Express 서버 + Gemini API + Git 저장소 스캔
 docs/EVIDENCE.md       # 개선 증적 로그 (IMP-XXX)
 ```
 

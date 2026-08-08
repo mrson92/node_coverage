@@ -222,3 +222,37 @@
 - `server/routes/*` 3개 + `server/services/*` 2개 + `server/app.ts` 신설로 기존 모놀리식 `server.ts`의 책임이 분산됨
 - `src/hooks/useAnalysisEngine.ts`(약 480줄) 신설, `src/App.tsx`는 JSX 중점으로 축소
 - SSRF 검증 로그: private/loopback URL은 차단되고, 공인 Git URL은 클론/스캔 성공
+
+---
+
+## IMP-007: 저장소 배치(다중 파일) 분석 + 리포트 내보내기 + 서버 세션 인증 + 풀 스위트 누적 버그 (2026-08-08)
+
+- **상태**: 완료
+- **날짜**: 2026-08-08
+- **작성자**: opencode
+- **개선 목표**: TODO 백로그 재개 후 (1) 풀 테스트 스위트 순차 애니메이션의 커버리지 누적 버그, (2) Git 저장소 다중 파일 통합(배치) 분석, (3) 분석 결과 리포트(JSON/Markdown) 내보내기, (4) 데모 localStorage 인증을 서버 세션 인증으로 교체, (5) 문서 정리·하드코딩 라벨 해소를 일괄 진행한다.
+
+### 개선 내역
+
+| 항목 | 내용 |
+|------|------|
+| 풀 테스트 스위트 누적 버그 수정 | `useAnalysisEngine.ts`의 `handleSimulateNodeExecution`·`handleResetCoverage`가 stale closure(`analysisResults`)를 참조해 **풀 스위트 애니메이션 중 커버리지가 누적되지 않고 마지막 노드만 covered** 되는 문제를 `setAnalysisResults(기능 업데이트)`로 수정 |
+| 저장소 배치(다중 파일) 통합 분석 | 서버 `POST /api/analyze/batch`(최대 12개·700KB 제한) 신설, `runBatchAnalysisExtraction`/`BATCH_ANALYZE_SYSTEM_PROMPT`/`normalizeBatchResult`(파일줄기 접두 id 정규화 + `sourceFile` 태깅), `repoClone.readRepoFiles` 다중 읽기 추가. 클라이언트 `MultiFileGitAnalyzer`에 체크박스 다중 선택·전체 선택·배치 실행 UI, `useAnalysisEngine.handleBatchAnalyzeCode`(성공 시 병합 결과 로드, 실패 시 per-file 폴백 병합) |
+| 분석 결과 리포트 내보기 | `src/utils/reportExport.ts` [NEW] — 현재 분석(코드/CFG/RTM/커버리지/최적화)을 JSON·Markdown 파일로 다운로드. 헤더에 JSON/MD 내보내기 버튼 추가 |
+| 백엔드 인증 연동 | `server/services/auth.ts` [NEW]: HMAC-SHA256 서명 토큰(sign/verify, 만료), SHA-256 해시 자격 검증, `server/routes/auth.ts` [NEW]: `POST /api/auth/login`·`GET /api/auth/me`. `/api/health`·정적 자산을 제외한 모든 `/api/*`에 `requireAuth`(Bearer) 적용. `AuthScreen.tsx`를 서버 세션 기반으로 재작성(저장 토큰 재검증), 클라이언트 파처에 `Authorization` 헤더 주입 |
+| 문서/README 정리 + 라벨 동적화 | `AGENTS.md`·`README.md`에 인증/batch/구조 변경 반영. `App.tsx` 하드코딩 `Core v4.2 (Docker)` → `src/constants.ts` `ENGINE_VERSION`(`Core v2.0.0 (Dev)`) |
+
+### 검증 절차
+- [x] `npm run lint` (`tsc --noEmit`) → **TypeScript: No errors found**
+- [x] `npm run build` → client + `dist/server.cjs` 정상 생성
+- [x] `npm run dev` 스모크: `/api/health` 정상, 로그인 정답 200/오답 401, `/api/auth/me` 200, 미인증 `/api/analyze`·`/api/analyze/batch`·`/api/repo/*` 모두 401
+- [x] `node dist/server.cjs` 프로덕션 스모크: 루트 SPA 200, 로그인 200, 미인증 API 401 (정적/API 인증 분리 확인)
+- [x] `/api/analyze/batch` 파라미터 검증: 빈 배열 → `400`
+
+### 변경 파일
+- `server/services/auth.ts` [NEW], `server/routes/auth.ts` [NEW], `server/app.ts` (auth route + requireAuth 가드)
+- `server/services/gemini.ts` (batch), `server/services/repoClone.ts` (readRepoFiles), `server/routes/analyze.ts` (batch route)
+- `src/utils/reportExport.ts` [NEW], `src/constants.ts` [NEW], `src/vite-env.d.ts` [NEW]
+- `src/types.ts`, `src/hooks/useAnalysisEngine.ts`, `src/App.tsx`, `src/components/AuthScreen.tsx`, `src/components/MultiFileGitAnalyzer.tsx`
+- `AGENTS.md`, `README.md`, `docs/TODO.md`, `docs/EVIDENCE.md`
+

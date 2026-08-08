@@ -18,7 +18,8 @@ Node Coverage Analyzer — an AI Studio applet: a multi-language (JS/Python/Java
 
 ## Architecture
 
-- `server.ts` is the single backend. Its API endpoints: `/api/health`, `/api/analyze` (Gemini CFG/node/edge/RTM extraction), `/api/optimize` (agentic coverage solver), `/api/repo/scan`, `/api/repo/file`. The Gemini model used is `gemini-3.5-flash`; responses use strict `responseSchema` — keep both prompt and schema in sync with `src/types.ts` (`AnalysisResults`, `CFGNode`, `CFGEdge`, etc.).
+- `server.ts` is the single backend. Its API endpoints: `/api/health`, `/api/auth/login`, `/api/auth/me`, `/api/analyze`, `/api/analyze/batch` (multi-file repo batch), `/api/optimize`, `/api/repo/scan`, `/api/repo/file`. The Gemini model used is `gemini-3.5-flash`; responses use strict `responseSchema` — keep both prompt and schema in sync with `src/types.ts` (`AnalysisResults`, `CFGNode`, `CFGEdge`, `RepoFileEntry`, `BatchSourceFile`, etc.).
+- All `/api/*` except `/api/health` and `/api/auth/*` require `Authorization: Bearer <token>` obtained from `POST /api/auth/login` (HMAC-SHA256 signed, server-side credential check in `server/services/auth.ts`). Demo account `demo@nodecov.io`/`demo1234`.
 - Frontend lives in `src/` (`App.tsx`, `components/`, `data/`, `types.ts`, `main.tsx`, `index.css`). Components fetch `/api/analyze`, `/api/optimize`, `/api/repo/*` directly (see `MultiFileGitAnalyzer.tsx`).
 - Path alias `@/*` → repo root (set in both `tsconfig.json` `paths` and `vite.config.ts` `resolve.alias`), so imports look like `@/components/...`.
 - `dist/` is build output (client assets + `server.cjs`). Do not edit; regenerate via `npm run build`.

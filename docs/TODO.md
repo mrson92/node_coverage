@@ -24,6 +24,8 @@
 
 ## 완료 (Completed)
 
+- [x] **IMP-007: 저장소 배치(다중 파일) 통합 분석 + 리포트 내보내기 + 서버 세션 인증 + 풀 스위트 누적 버그 + 문서 정리** — `/api/analyze/batch`(배치 병합 분석), `reportExport.ts`(JSON/MD 리포트 다운로드), `server/services|routes/auth`(HMAC 토큰 서버 인증), `useAnalysisEngine` 시뮬레이터 기능 업데이트, `ENGINE_VERSION` 동적 라벨. `docs/EVIDENCE.md` IMP-007 참조. (2026-08-08)
+
 - [x] **IMP-006: 백엔드 구조 분리 + 타입 공유 + 클라이언트 훅 리팩토링 + Git URL SSRF 방어** — `server.ts`→routes/services 분리, `src/types.ts` 공유 타입, `useAnalysisEngine.ts` 훅 신설, `assertSafeGitUrl` SSRF 방어. `docs/EVIDENCE.md` IMP-006 참조. (2026-08-08)
 
 - [x] **IMP-001: 로컬 파일 선택/드래그앤드롭** — `LocalFileUploader.tsx` + 확장자 기반 언어 자동 판별(`utils/languageDetection.ts`) 추가. `docs/EVIDENCE.md` IMP-005 참조. (2026-08-07)

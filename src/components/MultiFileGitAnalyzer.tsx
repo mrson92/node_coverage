@@ -15,7 +15,7 @@ import {
   RefreshCcw,
   Braces,
 } from "lucide-react";
-import { SupportedLanguage } from "../types";
+import { SupportedLanguage, BatchSourceFile } from "../types";
 
 // Mirrors the server-side repository file entry shape
 interface RepoFileEntry {
@@ -24,9 +24,17 @@ interface RepoFileEntry {
   language: SupportedLanguage | null;
 }
 
+const AUTH_TOKEN_KEY = "node-coverage-token";
+function authHeaders(): Record<string, string> {
+  const token = localStorage.getItem(AUTH_TOKEN_KEY) || sessionStorage.getItem(AUTH_TOKEN_KEY);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 interface MultiFileGitAnalyzerProps {
   onLoadResolvedCode: (language: SupportedLanguage, code: string, requirements: string) => void;
+  onBatchAnalyze: (files: BatchSourceFile[], requirements: string) => Promise<void>;
   currentLanguage: SupportedLanguage;
+  isBatchAnalyzing?: boolean;
 }
 
 const LANG_LABEL: Record<SupportedLanguage, string> = {
@@ -45,7 +53,7 @@ const SCAN_STEPS = [
   "Indexing source files and detecting languages...",
 ];
 
-export function MultiFileGitAnalyzer({ onLoadResolvedCode, currentLanguage }: MultiFileGitAnalyzerProps) {
+export function MultiFileGitAnalyzer({ onLoadResolvedCode, onBatchAnalyze, currentLanguage, isBatchAnalyzing }: MultiFileGitAnalyzerProps) {
   // Input states
   const [gitUrl, setGitUrl] = useState<string>("");
   const [branch, setBranch] = useState<string>("main");
@@ -65,12 +73,16 @@ export function MultiFileGitAnalyzer({ onLoadResolvedCode, currentLanguage }: Mu
   const [isLoadingFile, setIsLoadingFile] = useState<boolean>(false);
   const [isInjecting, setIsInjecting] = useState<boolean>(false);
 
+  // Batch selection state
+  const [batchSelection, setBatchSelection] = useState<Set<string>>(new Set());
+  const [batchError, setBatchError] = useState<string | null>(null);
+
   const loadFileContent = useCallback(async (url: string, br: string, relPath: string) => {
     setIsLoadingFile(true);
     try {
       const res = await fetch("/api/repo/file", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ url, branch: br, path: relPath }),
       });
       const data = await res.json();
@@ -98,6 +110,8 @@ export function MultiFileGitAnalyzer({ onLoadResolvedCode, currentLanguage }: Mu
     setFiles([]);
     setFileContent("");
     setSelectedFile(null);
+    setBatchSelection(new Set());
+    setBatchError(null);
 
     // Animate progress steps while the clone runs in the background
     let currentIdx = 0;
@@ -112,7 +126,7 @@ export function MultiFileGitAnalyzer({ onLoadResolvedCode, currentLanguage }: Mu
     try {
       const res = await fetch("/api/repo/scan", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ url, branch: branch.trim() || "main" }),
       });
       const data = await res.json();
@@ -159,7 +173,7 @@ export function MultiFileGitAnalyzer({ onLoadResolvedCode, currentLanguage }: Mu
       if (!content && gitUrl.trim()) {
         const res = await fetch("/api/repo/file", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...authHeaders() },
           body: JSON.stringify({
             url: gitUrl.trim(),
             branch: branch.trim() || "main",
@@ -185,6 +199,65 @@ export function MultiFileGitAnalyzer({ onLoadResolvedCode, currentLanguage }: Mu
     } finally {
       setIsInjecting(false);
     }
+  };
+
+  const BATCH_MAX_FILES = 12;
+
+  const sourceFiles = files.filter((f) => f.language);
+
+  const toggleBatchFile = (path: string) => {
+    setBatchSelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  const handleSelectAllSource = () => {
+    setBatchSelection((prev) => {
+      if (prev.size === sourceFiles.length) return new Set();
+      return new Set(sourceFiles.map((f) => f.path));
+    });
+  };
+
+  const handleBatchAnalyze = async () => {
+    if (!gitUrl.trim() || batchSelection.size === 0) {
+      setBatchError("배치 분석할 소스를 선택해 주세요.");
+      return;
+    }
+    const sel = files.filter((f) => batchSelection.has(f.path));
+    if (sel.length > BATCH_MAX_FILES) {
+      setBatchError(`한 번에 최대 ${BATCH_MAX_FILES}개 파일까지 선택할 수 있습니다.`);
+      return;
+    }
+
+    setBatchError(null);
+    const payload: BatchSourceFile[] = [];
+    for (const f of sel) {
+      if (!f.language) continue;
+      try {
+        const res = await fetch("/api/repo/file", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify({ url: gitUrl.trim(), branch: branch.trim() || "main", path: f.path }),
+        });
+        const data = await res.json();
+        if (res.ok && data.content) {
+          payload.push({ path: f.path, language: f.language, code: data.content });
+        }
+      } catch {
+        // 개별 파일 읽기 실패는 무시
+      }
+    }
+
+    if (payload.length === 0) {
+      setBatchError("배치 분석 대상 소스 파일을 읽지 못했습니다.");
+      return;
+    }
+
+    const reqs = `저장소 배치 통합 분석 (${payload.length}개 파일). 각 파일의 진입점 흐름, 제어 흐름, 오류 처리, 보안 관련 경로를 기준으로 RTM 요건을 도출하십시오.`;
+    await onBatchAnalyze(payload, reqs);
   };
 
   const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
@@ -295,11 +368,22 @@ export function MultiFileGitAnalyzer({ onLoadResolvedCode, currentLanguage }: Mu
               <span className="text-[10px] font-mono text-stone-300 font-bold uppercase">
                 Source Files ({files.length})
               </span>
-              <span className="text-[9px] font-mono text-emerald-400">Scan Complete</span>
+              <div className="flex items-center gap-1">
+                <span className="text-[9px] font-mono text-emerald-400">Scan Complete</span>
+              </div>
             </div>
 
             <div className="border border-[#222] rounded-xs bg-[#080808]/60 p-2 text-stone-400 space-y-1 max-h-[280px] overflow-auto">
-              <span className="text-[9px] text-gray-500 font-mono block pl-2 mb-1.5 uppercase">Repository File Tree</span>
+              <div className="flex items-center justify-between pl-2 pr-1 mb-1.5">
+                <span className="text-[9px] text-gray-500 font-mono uppercase">Repository File Tree</span>
+                <button
+                  onClick={handleSelectAllSource}
+                  disabled={!files.some((f) => f.language) || isBatchAnalyzing}
+                  className="text-[9px] font-mono text-[#A1824A] hover:text-white border border-[#A1824A]/40 px-1.5 py-0.5 rounded-xs cursor-pointer disabled:opacity-40 uppercase"
+                >
+                  {batchSelection.size === sourceFiles.length && batchSelection.size > 0 ? "선택 해제" : "소스 전체 선택"}
+                </button>
+              </div>
               {files.length === 0 && (
                 <span className="text-[10px] text-gray-500 block pl-2">
                   분석 가능한 소스 파일이 없습니다.
@@ -308,6 +392,8 @@ export function MultiFileGitAnalyzer({ onLoadResolvedCode, currentLanguage }: Mu
               {files.map((file) => {
                 const isSelected = selectedFile === file.path;
                 const isMain = file.path === entrypoint;
+                const isBatchPicked = batchSelection.has(file.path);
+                const isSelectable = !!file.language;
 
                 return (
                   <div
@@ -317,9 +403,33 @@ export function MultiFileGitAnalyzer({ onLoadResolvedCode, currentLanguage }: Mu
                       isSelected
                         ? "bg-[#14120e] border-[#A1824A] text-stone-100"
                         : "bg-[#0c0c0c] border-[#1d1d1d] hover:border-stone-700 hover:bg-[#111]"
-                    }`}
+                    } ${isBatchPicked ? "ring-1 ring-emerald-500/50" : ""}`}
                   >
                     <div className="flex items-center gap-2 min-w-0">
+                      <div
+                        role="checkbox"
+                        aria-checked={isBatchPicked}
+                        tabIndex={0}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isSelectable) toggleBatchFile(file.path);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            if (isSelectable) toggleBatchFile(file.path);
+                          }
+                        }}
+                        className={`shrink-0 size-3.5 rounded-xs border flex items-center justify-center cursor-pointer ${
+                          isSelectable
+                            ? isBatchPicked
+                              ? "bg-emerald-500 border-emerald-400 text-black"
+                              : "border-stone-600 hover:border-emerald-500/70"
+                            : "border-stone-800 opacity-30 cursor-not-allowed"
+                        }`}
+                      >
+                        {isBatchPicked && <Check className="size-2.5" />}
+                      </div>
                       <FileCode className={`w-3.5 h-3.5 shrink-0 ${isMain ? "text-[#A1824A]" : "text-gray-500"}`} />
                       <div className="flex flex-col min-w-0">
                         <span className="text-[11px] font-mono font-medium truncate">{file.path}</span>
@@ -342,6 +452,38 @@ export function MultiFileGitAnalyzer({ onLoadResolvedCode, currentLanguage }: Mu
                   </div>
                 );
               })}
+            </div>
+
+            {/* Batch selection summary + run control */}
+            <div className="border border-[#222] bg-[#111]/40 p-2.5 rounded-xs flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] font-mono text-stone-400 uppercase font-bold flex items-center gap-1.5">
+                  <Braces className="w-3 h-3 text-[#A1824A]" />
+                  통합 배치 분석 선택
+                </span>
+                <span className="text-[9px] font-mono text-emerald-400">
+                  {batchSelection.size} / {Math.min(sourceFiles.length, BATCH_MAX_FILES)}
+                </span>
+              </div>
+              <button
+                onClick={handleBatchAnalyze}
+                disabled={batchSelection.size === 0 || isBatchAnalyzing}
+                className="w-full py-2 bg-emerald-700/80 hover:bg-emerald-600/80 text-white text-[10px] font-bold rounded-xs cursor-pointer flex items-center justify-center gap-2 transition-all border border-emerald-600/40 disabled:opacity-50 active:scale-[0.99]"
+              >
+                {isBatchAnalyzing ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3 h-3" />
+                )}
+                <span>
+                  {isBatchAnalyzing
+                    ? "다중 파일 통합 CFG 분석 중..."
+                    : `${batchSelection.size}개 소스 파일 통합 배치 분석 실행`}
+                </span>
+              </button>
+              {batchError && (
+                <span className="text-[9px] font-mono text-red-400/80">{batchError}</span>
+              )}
             </div>
 
             {/* Real repository statistics */}

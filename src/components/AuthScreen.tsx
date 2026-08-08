@@ -1,14 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Network,
   KeyRound,
   Eye,
   EyeOff,
   Mail,
-  UserRound,
-  Phone,
-  ArrowLeft,
-  MailCheck,
   ShieldCheck,
   CheckCircle2,
 } from "lucide-react";
@@ -29,7 +25,6 @@ import {
 } from "@/components/ui/input-group";
 import {
   Field,
-  FieldError,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
@@ -37,75 +32,35 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "@/components/ui/spinner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 
-type AuthMode = "login" | "password" | "email";
-
-interface AuthUser {
-  password: string;
-  name: string;
-  phone: string;
-}
-
-interface AuthScreenProps {
-  onLogin: () => void;
-}
-
-const USERS_KEY = "node-coverage-users";
-const AUTH_KEY = "node-coverage-auth";
+const TOKEN_KEY = "node-coverage-token";
 const DEMO_EMAIL = "demo@nodecov.io";
 const DEMO_PASSWORD = "demo1234";
 
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
 
-// Web Crypto SHA-256 해시. 비보안 컨텍스트에서는 평문 폴백(로컬 데모 전용).
-async function hashPassword(plain: string): Promise<string> {
-  if (typeof crypto !== "undefined" && crypto.subtle) {
-    try {
-      const data = new TextEncoder().encode(plain);
-      const digest = await crypto.subtle.digest("SHA-256", data);
-      return Array.from(new Uint8Array(digest))
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
-    } catch {
-      // fall through to plaintext compare on unsupported crypto contexts
-    }
-  }
-  return plain;
+interface AuthScreenProps {
+  onLogin: () => void;
 }
 
-async function handleSeed(users: Record<string, AuthUser>): Promise<void> {
-  const demoHashed = await hashPassword(DEMO_PASSWORD);
-  const demo = users[DEMO_EMAIL];
-  // 평문 레거시 계정이거나 해시 아님 → 해시로 마이그레이션(재시드)
-  if (!demo || demo.password !== demoHashed || demo.password.length < 64) {
-    users[DEMO_EMAIL] = { password: demoHashed, name: "김데모", phone: "010-1234-5678" };
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-  }
+function readStoredToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY);
 }
 
-async function loadUsers(): Promise<Record<string, AuthUser>> {
-  let users: Record<string, AuthUser> = {};
+// 저장된 토큰이 유효한지 서버에 확인
+export async function isServerSessionValid(token: string): Promise<boolean> {
   try {
-    const raw = localStorage.getItem(USERS_KEY);
-    if (raw) users = JSON.parse(raw) as Record<string, AuthUser>;
+    const res = await fetch("/api/auth/me", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return res.ok;
   } catch {
-    // Ignore corrupted storage and re-seed below.
+    return false;
   }
-  await handleSeed(users);
-  return users;
-}
-
-function maskEmail(email: string): string {
-  const [local, domain] = email.split("@");
-  const head = local.slice(0, 2);
-  return `${head}***@${domain}`;
 }
 
 export function AuthScreen({ onLogin }: AuthScreenProps) {
-  const [mode, setMode] = useState<AuthMode>("login");
-
-  // Login form state
+  const [checking, setChecking] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -113,84 +68,63 @@ export function AuthScreen({ onLogin }: AuthScreenProps) {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Password recovery state
-  const [resetEmail, setResetEmail] = useState("");
-  const [resetSent, setResetSent] = useState(false);
-  const [resetError, setResetError] = useState<string | null>(null);
+  // 마운트 시 저장된 세션이 유효하면 바로 진입
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const token = readStoredToken();
+      if (token && (await isServerSessionValid(token))) {
+        if (!cancelled) onLogin();
+      } else if (token) {
+        localStorage.removeItem(TOKEN_KEY);
+        sessionStorage.removeItem(TOKEN_KEY);
+      }
+      if (!cancelled) setChecking(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [onLogin]);
 
-  // Email recovery state
-  const [findName, setFindName] = useState("");
-  const [findPhone, setFindPhone] = useState("");
-  const [foundEmail, setFoundEmail] = useState<string | null>(null);
-  const [findError, setFindError] = useState<string | null>(null);
-
-  const switchMode = (next: AuthMode) => {
-    setMode(next);
-    setLoginError(null);
-    setResetError(null);
-    setResetSent(false);
-    setFoundEmail(null);
-    setFindError(null);
-  };
+  if (checking) {
+    return (
+      <div className="relative min-h-screen bg-[#080808] text-[#cccccc] font-sans flex items-center justify-center px-4 py-10">
+        <Spinner />
+      </div>
+    );
+  }
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const users = await loadUsers();
-
     if (!EMAIL_RE.test(email)) {
       setLoginError("유효한 이메일 주소를 입력해 주세요.");
       return;
     }
-    const submittedHash = await hashPassword(password);
-    const user = users[email.trim().toLowerCase()];
-    if (!user || user.password !== submittedHash) {
-      setLoginError("이메일 또는 암호가 올바르지 않습니다.");
-      return;
-    }
-
-    setLoginError(null);
     setSubmitting(true);
-    window.setTimeout(() => {
-      if (remember) {
-        localStorage.setItem(AUTH_KEY, "1");
-      } else {
-        sessionStorage.setItem(AUTH_KEY, "1");
+    setLoginError(null);
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setLoginError(data.error || "인증에 실패했습니다.");
+        return;
       }
-      setSubmitting(false);
+      const token: string = data.token;
+      if (remember) {
+        localStorage.setItem(TOKEN_KEY, token);
+      } else {
+        sessionStorage.setItem(TOKEN_KEY, token);
+      }
       onLogin();
-    }, 600);
-  };
-
-  const handleResetSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const users = await loadUsers();
-    const target = resetEmail.trim().toLowerCase();
-
-    if (!EMAIL_RE.test(target)) {
-      setResetError("유효한 이메일 주소를 입력해 주세요.");
-      return;
+    } catch {
+      setLoginError("서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setSubmitting(false);
     }
-    if (!users[target]) {
-      setResetError("등록된 계정이 없습니다. 이메일 주소를 확인해 주세요.");
-      return;
-    }
-    setResetError(null);
-    setResetSent(true);
-  };
-
-  const handleFindSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const users = await loadUsers();
-    const found = Object.entries(users).find(
-      ([, u]) => u.name === findName.trim() && u.phone === findPhone.trim()
-    );
-
-    if (!found) {
-      setFindError("입력한 이름과 연락처와 일치하는 계정을 찾을 수 없습니다.");
-      return;
-    }
-    setFindError(null);
-    setFoundEmail(maskEmail(found[0]));
   };
 
   const loginFieldInvalid = !!loginError;
@@ -220,283 +154,115 @@ export function AuthScreen({ onLogin }: AuthScreenProps) {
         </div>
         <Badge variant="outline" className="border-[#A1824A]/30 text-[#A1824A] font-mono gap-1.5 mt-1">
           <ShieldCheck className="size-3" />
-          SECURE GATEWAY ACCESS
+          SERVER-SIDE SECURE GATEWAY
         </Badge>
       </div>
 
       <Card className="relative w-full max-w-md border-[#222] bg-[#0c0c0c]/90 shadow-2xl shadow-black/60 ring-[#A1824A]/10">
         <CardHeader className="border-b border-[#111]">
-          <CardTitle className="text-[#A1824A] text-base tracking-wide font-sans">
-            {mode === "login" && "회원 로그인"}
-            {mode === "password" && "암호 찾기"}
-            {mode === "email" && "이메일 주소 찾기"}
-          </CardTitle>
+          <CardTitle className="text-[#A1824A] text-base tracking-wide font-sans">회원 로그인</CardTitle>
           <CardDescription className="text-gray-500">
-            {mode === "login" && "등록된 이메일 주소와 암호를 입력하여 대시보드에 접속하십시오."}
-            {mode === "password" && "가입 시 등록한 이메일 주소로 암호 재설정 안내를 보내드립니다."}
-            {mode === "email" && "가입 시 등록한 이름과 연락처로 이메일 주소를 찾아드립니다."}
+            서버 세션 기반 인증입니다. 등록된 이메일 주소와 암호를 입력하여 대시보드에 접속하십시오.
           </CardDescription>
         </CardHeader>
 
         <CardContent className="pt-5">
-          {mode === "login" && (
-            <form onSubmit={handleLoginSubmit} noValidate>
-              <FieldGroup>
-                <Field data-invalid={loginFieldInvalid}>
-                  <FieldLabel htmlFor="login-email" className="text-gray-400">
-                    <Mail className="size-3.5 text-[#A1824A]" />
-                    이메일 주소
-                  </FieldLabel>
-                  <Input
-                    id="login-email"
-                    type="email"
-                    autoComplete="email"
-                    placeholder="name@example.com"
-                    className="h-9 bg-[#080808] text-stone-200 border-[#222] focus:border-[#A1824A]/60"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+          <form onSubmit={handleLoginSubmit} noValidate>
+            <FieldGroup>
+              <Field data-invalid={loginFieldInvalid}>
+                <FieldLabel htmlFor="login-email" className="text-gray-400">
+                  <Mail className="size-3.5 text-[#A1824A]" />
+                  이메일 주소
+                </FieldLabel>
+                <Input
+                  id="login-email"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="name@example.com"
+                  className="h-9 bg-[#080808] text-stone-200 border-[#222] focus:border-[#A1824A]/60"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  aria-invalid={loginFieldInvalid}
+                />
+              </Field>
+
+              <Field data-invalid={loginFieldInvalid}>
+                <FieldLabel htmlFor="login-password" className="text-gray-400">
+                  <KeyRound className="size-3.5 text-[#A1824A]" />
+                  암호
+                </FieldLabel>
+                <InputGroup className="h-11 bg-[#080808] border-[#222] focus-within:border-[#A1824A]/60">
+                  <InputGroupInput
+                    id="login-password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
+                    placeholder="••••••••"
+                    className="text-stone-200"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
                     aria-invalid={loginFieldInvalid}
                   />
-                </Field>
+                  <InputGroupAddon align="inline-end">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-gray-400 hover:text-[#A1824A] hover:bg-transparent"
+                      onClick={() => setShowPassword((v) => !v)}
+                      aria-label={showPassword ? "암호 숨기기" : "암호 보기"}
+                    >
+                      {showPassword ? <EyeOff /> : <Eye />}
+                    </Button>
+                  </InputGroupAddon>
+                </InputGroup>
+              </Field>
 
-                <Field data-invalid={loginFieldInvalid}>
-                  <FieldLabel htmlFor="login-password" className="text-gray-400">
-                    <KeyRound className="size-3.5 text-[#A1824A]" />
-                    암호
-                  </FieldLabel>
-                  <InputGroup className="h-9 bg-[#080808] border-[#222] focus-within:border-[#A1824A]/60">
-                    <InputGroupInput
-                      id="login-password"
-                      type={showPassword ? "text" : "password"}
-                      autoComplete="current-password"
-                      placeholder="••••••••"
-                      className="text-stone-200"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      aria-invalid={loginFieldInvalid}
-                    />
-                    <InputGroupAddon align="inline-end">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        className="text-gray-400 hover:text-[#A1824A] hover:bg-transparent"
-                        onClick={() => setShowPassword((v) => !v)}
-                        aria-label={showPassword ? "암호 숨기기" : "암호 보기"}
-                      >
-                        {showPassword ? <EyeOff /> : <Eye />}
-                      </Button>
-                    </InputGroupAddon>
-                  </InputGroup>
-                </Field>
+              <Field orientation="horizontal" className="gap-2">
+                <Checkbox
+                  id="remember-me"
+                  checked={remember}
+                  onCheckedChange={(checked) => setRemember(checked === true)}
+                />
+                <FieldLabel htmlFor="remember-me" className="font-normal text-gray-400 text-xs">
+                  로그인 상태 유지
+                </FieldLabel>
+              </Field>
 
-                <Field orientation="horizontal" className="gap-2">
-                  <Checkbox
-                    id="remember-me"
-                    checked={remember}
-                    onCheckedChange={(checked) => setRemember(checked === true)}
-                  />
-                  <FieldLabel htmlFor="remember-me" className="font-normal text-gray-400 text-xs">
-                    로그인 상태 유지
-                  </FieldLabel>
-                </Field>
+              {loginError && (
+                <Alert variant="destructive">
+                  <ShieldCheck />
+                  <AlertTitle>로그인 실패</AlertTitle>
+                  <AlertDescription>{loginError}</AlertDescription>
+                </Alert>
+              )}
 
-                {loginError && (
-                  <Alert variant="destructive">
-                    <ShieldCheck />
-                    <AlertTitle>로그인 실패</AlertTitle>
-                    <AlertDescription>{loginError}</AlertDescription>
-                  </Alert>
+              <Button
+                type="submit"
+                disabled={submitting}
+                className="w-full h-11 bg-[#A1824A] hover:bg-[#A1824A]/90 text-white font-bold"
+              >
+                {submitting ? (
+                  <Spinner data-icon="inline-start" />
+                ) : (
+                  <KeyRound data-icon="inline-start" />
                 )}
-
-                <Button
-                  type="submit"
-                  disabled={submitting}
-                  className="w-full h-9 bg-[#A1824A] hover:bg-[#A1824A]/90 text-white font-bold"
-                >
-                  {submitting ? (
-                    <Spinner data-icon="inline-start" />
-                  ) : (
-                    <KeyRound data-icon="inline-start" />
-                  )}
-                  {submitting ? "인증 확인 중..." : "로그인"}
-                </Button>
-              </FieldGroup>
-            </form>
-          )}
-
-          {mode === "password" && (
-            <form onSubmit={handleResetSubmit} noValidate>
-              <FieldGroup>
-                <Field data-invalid={!!resetError}>
-                  <FieldLabel htmlFor="reset-email" className="text-gray-400">
-                    <Mail className="size-3.5 text-[#A1824A]" />
-                    가입 이메일 주소
-                  </FieldLabel>
-                  <Input
-                    id="reset-email"
-                    type="email"
-                    autoComplete="email"
-                    placeholder="name@example.com"
-                    className="h-9 bg-[#080808] text-stone-200 border-[#222] focus:border-[#A1824A]/60"
-                    value={resetEmail}
-                    onChange={(e) => setResetEmail(e.target.value)}
-                    aria-invalid={!!resetError}
-                  />
-                </Field>
-
-                {resetError && (
-                  <Alert variant="destructive">
-                    <ShieldCheck />
-                    <AlertTitle>찾기 실패</AlertTitle>
-                    <AlertDescription>{resetError}</AlertDescription>
-                  </Alert>
-                )}
-
-                {resetSent && (
-                  <Alert>
-                    <MailCheck />
-                    <AlertTitle>재설정 메일 발송 완료</AlertTitle>
-                    <AlertDescription>
-                      <code className="font-mono text-[#A1824A]">{resetEmail.trim().toLowerCase()}</code>{" "}
-                      계정으로 암호 재설정 안내 메일이 발송되었습니다. 메일함을 확인해 주세요.
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                <Button
-                  type="submit"
-                  disabled={resetSent}
-                  className="w-full h-9 bg-[#A1824A] hover:bg-[#A1824A]/90 text-white font-bold"
-                >
-                  <MailCheck data-icon="inline-start" />
-                  재설정 링크 보내기
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="link"
-                  className="w-fit mx-auto text-gray-400 hover:text-[#A1824A]"
-                  onClick={() => switchMode("login")}
-                >
-                  <ArrowLeft className="size-3.5" />
-                  로그인 화면으로 돌아가기
-                </Button>
-              </FieldGroup>
-            </form>
-          )}
-
-          {mode === "email" && (
-            <form onSubmit={handleFindSubmit} noValidate>
-              <FieldGroup>
-                <Field data-invalid={!!findError}>
-                  <FieldLabel htmlFor="find-name" className="text-gray-400">
-                    <UserRound className="size-3.5 text-[#A1824A]" />
-                    가입 시 입력한 이름
-                  </FieldLabel>
-                  <Input
-                    id="find-name"
-                    type="text"
-                    placeholder="홍길동"
-                    className="h-9 bg-[#080808] text-stone-200 border-[#222] focus:border-[#A1824A]/60"
-                    value={findName}
-                    onChange={(e) => setFindName(e.target.value)}
-                    aria-invalid={!!findError}
-                  />
-                </Field>
-
-                <Field data-invalid={!!findError}>
-                  <FieldLabel htmlFor="find-phone" className="text-gray-400">
-                    <Phone className="size-3.5 text-[#A1824A]" />
-                    가입 시 입력한 연락처
-                  </FieldLabel>
-                  <Input
-                    id="find-phone"
-                    type="tel"
-                    placeholder="010-0000-0000"
-                    className="h-9 bg-[#080808] text-stone-200 border-[#222] focus:border-[#A1824A]/60"
-                    value={findPhone}
-                    onChange={(e) => setFindPhone(e.target.value)}
-                    aria-invalid={!!findError}
-                  />
-                </Field>
-
-                {findError && (
-                  <Alert variant="destructive">
-                    <ShieldCheck />
-                    <AlertTitle>찾기 실패</AlertTitle>
-                    <AlertDescription>{findError}</AlertDescription>
-                  </Alert>
-                )}
-
-                {foundEmail && (
-                  <Alert>
-                    <CheckCircle2 />
-                    <AlertTitle>이메일 주소를 찾았습니다</AlertTitle>
-                    <AlertDescription>
-                      등록된 이메일 주소는{" "}
-                      <code className="font-mono text-[#A1824A]">{foundEmail}</code> 입니다.
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                <Button
-                  type="submit"
-                  disabled={!!foundEmail}
-                  className="w-full h-9 bg-[#A1824A] hover:bg-[#A1824A]/90 text-white font-bold"
-                >
-                  <Mail data-icon="inline-start" />
-                  이메일 주소 찾기
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="link"
-                  className="w-fit mx-auto text-gray-400 hover:text-[#A1824A]"
-                  onClick={() => switchMode("login")}
-                >
-                  <ArrowLeft className="size-3.5" />
-                  로그인 화면으로 돌아가기
-                </Button>
-              </FieldGroup>
-            </form>
-          )}
+                {submitting ? "서버 인증 중..." : "로그인"}
+              </Button>
+            </FieldGroup>
+          </form>
         </CardContent>
 
         <CardFooter className="flex-col gap-3 bg-transparent border-t border-[#111] pt-4">
-          {mode === "login" && (
-            <>
-              <div className="flex items-center justify-center gap-2">
-                <Button
-                  variant="link"
-                  size="sm"
-                  className="text-gray-400 hover:text-[#A1824A]"
-                  onClick={() => switchMode("password")}
-                >
-                  암호 찾기
-                </Button>
-                <Separator orientation="vertical" className="h-4 bg-[#222]" />
-                <Button
-                  variant="link"
-                  size="sm"
-                  className="text-gray-400 hover:text-[#A1824A]"
-                  onClick={() => switchMode("email")}
-                >
-                  이메일 주소 찾기
-                </Button>
-              </div>
-              <p className="text-[11px] text-gray-600 font-mono text-center">
-                데모 계정&nbsp;
-                <code className="text-[#A1824A]">{DEMO_EMAIL}</code> /{" "}
-                <code className="text-[#A1824A]">{DEMO_PASSWORD}</code>
-              </p>
-            </>
-          )}
+          <p className="text-[11px] text-gray-600 font-mono text-center">
+            데모 계정&nbsp;
+            <code className="text-[#A1824A]">{DEMO_EMAIL}</code> /{" "}
+            <code className="text-[#A1824A]">{DEMO_PASSWORD}</code>
+          </p>
         </CardFooter>
       </Card>
 
       <p className="relative mt-6 text-[10px] text-gray-600 font-mono">
-        © 2026 Node Coverage Analyzer · 데모 로컬 인증 게이트웨이 v1.1 (비밀번호는 SHA-256 해시로 로컬 저장, 운영 배포 시 백엔드 인증으로 교체 필요)
+        © 2026 Node Coverage Analyzer · 서버 세션 인증 게이트웨이 v2.0 (HMAC-SHA256 서명 토큰, 서버 측 자격 검증)
       </p>
     </div>
   );

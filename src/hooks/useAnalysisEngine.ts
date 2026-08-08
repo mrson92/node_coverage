@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { SupportedLanguage, AnalysisResults, CFGNode, OptimizationResult } from "../types";
+import { SupportedLanguage, AnalysisResults, CFGNode, OptimizationResult, BatchSourceFile } from "../types";
 import { TEMPLATES } from "../data/mockTemplates";
 import { FALLBACK_RESULTS } from "../data/fallbackResults";
 import { AnalysisSession } from "../components/HistorySidebar";
@@ -25,6 +25,12 @@ const EMPTY_STATS: DashboardStats = {
 };
 
 const MAX_SESSIONS = 30;
+const AUTH_TOKEN_KEY = "node-coverage-token";
+
+function authHeaders(): Record<string, string> {
+  const token = localStorage.getItem(AUTH_TOKEN_KEY) || sessionStorage.getItem(AUTH_TOKEN_KEY);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 export function useAnalysisEngine() {
   // 1. Core States
@@ -197,7 +203,7 @@ export function useAnalysisEngine() {
     try {
       const response = await fetch("/api/analyze", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ code, language: selectedLanguage, requirements }),
       });
 
@@ -242,6 +248,96 @@ export function useAnalysisEngine() {
     }
   };
 
+  // 저장소 배치(다중 파일) 통합 분석
+  const handleBatchAnalyzeCode = async (
+    batchFiles: BatchSourceFile[],
+    batchRequirements: string
+  ) => {
+    if (batchFiles.length === 0) return;
+    setIsAnalyzing(true);
+    setOptimizationResult(null);
+
+    if (simulationIntervalId) {
+      clearInterval(simulationIntervalId);
+      setSimulationIntervalId(null);
+    }
+
+    try {
+      const response = await fetch("/api/analyze/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ files: batchFiles, requirements: batchRequirements }),
+      });
+
+      if (!response.ok) {
+        throw new Error("API responded with an unexpected status code.");
+      }
+
+      const data = await response.json();
+      if (data && data.results && data.results.nodes) {
+        const parsedNodes = data.results.nodes.map((n: CFGNode) => ({
+          ...n,
+          isCovered: false,
+          executionCount: 0,
+        }));
+        const resultPayload: AnalysisResults = { ...data.results, nodes: parsedNodes };
+
+        setCode(data.mergedCode || batchFiles.map((f) => f.code).join("\n\n"));
+        setRequirements(batchRequirements);
+        setAnalysisResults(resultPayload);
+        setSelectedNodeId(parsedNodes[0]?.id || null);
+        saveSessionDirect(selectedLanguage, data.mergedCode ?? "", batchRequirements, resultPayload);
+      }
+    } catch (err) {
+      console.warn("Server Batch API failed. Merging single-result fallbacks as repo-level phantom graph.");
+
+      // 배치 실패 폴백: 각 파일의 단일 폴백 결과를 병합해 통합 세션 구성
+      const merged: AnalysisResults = {
+        nodes: [],
+        edges: [],
+        rtm: [],
+        complexity: { cyclomaticComplexity: 0, totalNodes: 0, totalEdges: 0 },
+        languageInsights: "",
+      };
+      const mergedCodeParts: string[] = [];
+      for (const f of batchFiles) {
+        const localFallback = FALLBACK_RESULTS[f.language];
+        const fileStem = f.path.split("/").pop()?.replace(/[^A-Za-z0-9_]/g, "_") || "file";
+        const prefixedNodes = localFallback.nodes.map((n) => ({
+          ...n,
+          id: `${fileStem}__${n.id}`,
+          sourceFile: f.path,
+          isCovered: false,
+          executionCount: 0,
+        }));
+        merged.nodes.push(...prefixedNodes);
+        merged.edges.push(...localFallback.edges.map((e) => ({
+          ...e,
+          source: `${fileStem}__${e.source}`,
+          target: `${fileStem}__${e.target}`,
+        })));
+        merged.rtm.push(...localFallback.rtm.map((t) => ({
+          ...t,
+          mappedNodeIds: t.mappedNodeIds.map((id) => `${fileStem}__${id}`),
+        })));
+        mergedCodeParts.push(`/** ===== FILE: ${f.path} ===== */\n${f.code}`);
+      }
+      merged.complexity.cyclomaticComplexity =
+        batchFiles.reduce((sum, f) => sum + (FALLBACK_RESULTS[f.language]?.complexity.cyclomaticComplexity || 0), 0);
+      merged.complexity.totalNodes = merged.nodes.length;
+      merged.complexity.totalEdges = merged.edges.length;
+
+      const mergedCode = mergedCodeParts.join("\n\n");
+      setCode(mergedCode);
+      setRequirements(batchRequirements);
+      setAnalysisResults(merged);
+      setSelectedNodeId(merged.nodes[0]?.id || null);
+      saveSessionDirect(selectedLanguage, mergedCode, batchRequirements, merged);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
   // Perform AI-powered agentic loop coverage constraint solver
   const handleRunAgentOptimization = async () => {
     if (!analysisResults || !selectedNodeId) return;
@@ -252,7 +348,7 @@ export function useAnalysisEngine() {
     try {
       const response = await fetch("/api/optimize", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           uncoveredNodeId: activeNode.id,
           code,
@@ -317,36 +413,37 @@ export function useAnalysisEngine() {
 
   // 4. Interactive Simulation Action Handlers
   const handleSimulateNodeExecution = (nodeId: string) => {
-    if (!analysisResults) return;
-
-    const updatedNodes = analysisResults.nodes.map((node) => {
-      if (node.id === nodeId) {
-        return {
-          ...node,
-          isCovered: true,
-          executionCount: (node.executionCount || 0) + 1,
-        };
-      }
-      return node;
+    setAnalysisResults((prev) => {
+      if (!prev) return prev;
+      const updatedNodes = prev.nodes.map((node) => {
+        if (node.id === nodeId) {
+          return {
+            ...node,
+            isCovered: true,
+            executionCount: (node.executionCount || 0) + 1,
+          };
+        }
+        return node;
+      });
+      return { ...prev, nodes: updatedNodes };
     });
-
-    setAnalysisResults({ ...analysisResults, nodes: updatedNodes });
   };
 
   const handleResetCoverage = () => {
-    if (!analysisResults) return;
     if (simulationIntervalId) {
       clearInterval(simulationIntervalId);
       setSimulationIntervalId(null);
     }
 
-    const resetNodes = analysisResults.nodes.map((node) => ({
-      ...node,
-      isCovered: false,
-      executionCount: 0,
-    }));
-
-    setAnalysisResults({ ...analysisResults, nodes: resetNodes });
+    setAnalysisResults((prev) => {
+      if (!prev) return prev;
+      const resetNodes = prev.nodes.map((node) => ({
+        ...node,
+        isCovered: false,
+        executionCount: 0,
+      }));
+      return { ...prev, nodes: resetNodes };
+    });
   };
 
   // Run full testing suite in sequence (visual animation callback simulation)
@@ -464,6 +561,7 @@ export function useAnalysisEngine() {
     handleDeleteSession,
     handleClearAllSessions,
     handleSaveCurrentSession,
+    handleBatchAnalyzeCode,
   };
 }
 

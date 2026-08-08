@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import type { AnalysisResults, OptimizationResult } from "../../src/types";
+import type { AnalysisResults, BatchSourceFile, CFGNode, OptimizationResult } from "../../src/types";
 
 // Gemini 클라이언트는 요청 시점에 lazily 초기화 (GEMINI_API_KEY 주입)
 let aiClient: GoogleGenAI | null = null;
@@ -63,6 +63,7 @@ export const ANALYZE_RESPONSE_SCHEMA = {
             enum: ["reachable", "unreachable", "conditional"],
           },
           description: { type: Type.STRING },
+          sourceFile: { type: Type.STRING, description: "Source file path this node belongs to (multi-file batch only)" },
           languageSpecificAspect: { type: Type.STRING, description: "Pointer jump, async handler, polymorphism annotation etc." },
         },
       },
@@ -141,6 +142,93 @@ Extract the CFG nodes, edges, RTM tracking, cyclomatic complexity metrics, and l
     },
   });
   return parseAnalysisResult(response.text || "{}");
+}
+
+// 몸체가 수정된 배치 분석: 다수의 소스 파일을 단일 CFG로 통합 추출
+const BATCH_ANALYZE_SYSTEM_PROMPT = `You are an advanced software static analysis and Control Flow Graph (CFG) creation engine.
+
+You are given a MULTI-FILE source tree. Analyze ALL files as a single integrated codebase:
+- Construct a unified CFG where nodes from the entrypoint and cross-file calls are connected (call edges across files).
+- For every node you emit, the "sourceFile" attribute MUST be set to the exact file path provided in the marker header (e.g. "src/index.ts").
+- Node ids must be unique across the whole repository. Prefix ids with a short stable file stem when files collide (e.g. "index__N1", "auth__N2").
+- Calculate a single Cyclomatic Complexity for the whole callable graph reachable from the main entrypoint.
+- Build an RTM mapping NLP requirements across the merged set of files, referencing unique node ids.
+- languageInsights should summarize cross-file coupling, module boundaries, and repository-level erosion risks.
+
+Language-Specific Analysis Directives:
+- C/C++: Track pointer references, macros, templates, indirect jumps, dangling pointer possibilities.
+- Java: Consider Polymorphism, dynamic binding, inheritance; highlight Yo-yo inheritance.
+- JavaScript/Web: Model async/await, promises, callbacks, event loop context.
+- Python: Address dynamic typing, dynamic function maps.
+
+Ensure your JSON outputs exactly align with the specified schema structure. DO NOT invent schema attributes.`;
+
+// 표기된 multi-file source를 단일 프롬프트 버퍼로 결합
+export function buildMultiFileBuffer(files: BatchSourceFile[], requirements: string): string {
+  const body = files
+    .map((f) => `// ===== FILE: ${f.path} (${f.language}) =====\n\`\`\`${f.language}\n${f.code}\n\`\`\`\n`)
+    .join("\n");
+  return `Project Source Tree:
+${body}
+
+System Requirements (NLP text or bullets):
+${requirements || "General operational logic of the code"}
+
+Analyze the whole multi-file project and output a MERGED CFG across files with cross-file edges, a single RTM, and repository-level complexity + language insights.`;
+}
+
+// 파싱 후 노드 id 중복/소스파일 누락을 정제
+export function normalizeBatchResult(results: AnalysisResults, files: BatchSourceFile[]): AnalysisResults {
+  const sourceFiles = new Set(files.map((f) => f.path));
+  const idIndexByFile = new Map<string, number>();
+  const idAlias = new Map<string, string>();
+
+  const nodes = (results.nodes || []).map((n) => {
+    const src = n.sourceFile || "";
+    const keepSrc = src && sourceFiles.has(src) ? src : "unknown";
+    const base = keepSrc !== "unknown" ? `${sanitizeStem(keepSrc)}__${n.id.replace(/^[A-Za-z0-9_]+__/, "")}` : n.id;
+    const idx = idIndexByFile.get(base) || 0;
+    idIndexByFile.set(base, idx + 1);
+    const finalId = idx === 0 ? base : `${base}_${idx}`;
+    idAlias.set(n.id, finalId);
+    return { ...n, id: finalId, sourceFile: keepSrc === "unknown" ? undefined : keepSrc } as CFGNode;
+  });
+
+  const edges = (results.edges || []).map((e) => ({
+    ...e,
+    source: idAlias.get(e.source) || e.source,
+    target: idAlias.get(e.target) || e.target,
+  }));
+
+  const rtm = (results.rtm || []).map((t) => ({
+    ...t,
+    mappedNodeIds: (t.mappedNodeIds || []).map((id) => idAlias.get(id) || id),
+  }));
+
+  return { ...results, nodes, edges, rtm };
+}
+
+function sanitizeStem(filePath: string): string {
+  const stem = filePath.split("/").pop() || filePath;
+  return stem.replace(/[^A-Za-z0-9_]/g, "_");
+}
+
+export async function runBatchAnalysisExtraction(
+  files: BatchSourceFile[],
+  requirements: string
+): Promise<AnalysisResults> {
+  const client = getAiClient();
+  const response = await client.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: buildMultiFileBuffer(files, requirements),
+    config: {
+      systemInstruction: BATCH_ANALYZE_SYSTEM_PROMPT,
+      responseMimeType: "application/json",
+      responseSchema: ANALYZE_RESPONSE_SCHEMA,
+    },
+  });
+  const parsed = parseAnalysisResult(response.text || "{}");
+  return normalizeBatchResult(parsed, files);
 }
 
 // ============================================================================

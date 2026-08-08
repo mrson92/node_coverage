@@ -5,25 +5,11 @@ import dns from "dns";
 import { isIP } from "net";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import type { RepoFileEntry, RepoScanResult, SupportedLanguage } from "../../src/types";
 
 const execFileAsync = promisify(execFile);
 
-type RepoLanguage = "javascript" | "python" | "java" | "cpp";
-
-export interface RepoFileEntry {
-  path: string;
-  size: number;
-  language: RepoLanguage | null;
-}
-
-export interface RepoScanResult {
-  repo: string;
-  branch: string;
-  fileCount: number;
-  sourceFileCount: number;
-  files: RepoFileEntry[];
-  entryCandidates: string[];
-}
+export type RepoLanguage = SupportedLanguage;
 
 const REPO_CACHE_ROOT = path.join(process.cwd(), ".repo-cache");
 const SKIP_DIRS = new Set([
