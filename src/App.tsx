@@ -12,6 +12,7 @@ import { HistorySidebar, AnalysisSession } from "./components/HistorySidebar";
 import { WorkflowHUD } from "./components/WorkflowHUD";
 import { IntegrationConsultant } from "./components/IntegrationConsultant";
 import { MultiFileGitAnalyzer } from "./components/MultiFileGitAnalyzer";
+import { LocalFileUploader } from "./components/LocalFileUploader";
 import { AuthScreen } from "./components/AuthScreen";
 
 import { 
@@ -305,6 +306,21 @@ REQ-05: 안전 이체 내역 레지스트리 비휘발성 저장`,
     });
   };
 
+  // Handle local browser file drop/select (extension-based language detection)
+  const handleLocalFileLoaded = (lang: SupportedLanguage, fileName: string, fileCode: string) => {
+    if (lang !== selectedLanguage) {
+      skipTemplateAutoLoadRef.current = true;
+    }
+    setSelectedLanguage(lang);
+    setCode(fileCode);
+    setRequirements(
+      `분석할 로컬 소스 파일: ${fileName}\n\n` +
+        `소스 코드를 분석하여 진입점(Entry) 흐름의 기능 요건을 작성하십시오.\n` +
+        `제어 흐름, 오류 처리, 보안 관련 경로를 기준으로 RTM 요건을 도출하십시오.`
+    );
+    setOptimizationResult(null);
+  };
+
   // Handle active analysis through server-side Gemini Proxy
   const handleAnalyzeCode = async () => {
     setIsAnalyzing(true);
@@ -519,14 +535,33 @@ REQ-05: 안전 이체 내역 레지스트리 비휘발성 저장`,
       ? Math.round((coveredEdgesCount / analysisResults.edges.length) * 100)
       : 0;
 
+    // 기술 부채 지수: 미커버 노드 비율(가중 10) + 순환 복잡도(최대 30, 가중 2) 합산
+    const uncoveredRatio = nodesCount > 0 ? 1 - coveredNodesCount / nodesCount : 0;
+    const complexityFactor = Math.min(analysisResults.complexity.cyclomaticComplexity, 30) / 30;
+    const debt = Math.round((uncoveredRatio * 10 + complexityFactor * 2) * 10) / 10;
+
+    // 과거 세션 대비 상대 추이 (각 세션의 coverage/complexity로 부채 지수 역산)
+    let debtDelta = 0;
+    if (sessions.length > 0) {
+      const sessionDebts = sessions.map((s) => {
+        const uncov = Math.max(0, (100 - s.coveragePercent)) / 100;
+        const comp = Math.min(s.complexity || 0, 30) / 30;
+        return uncov * 10 + comp * 2;
+      });
+      const avgDebt = sessionDebts.reduce((a, b) => a + b, 0) / sessionDebts.length;
+      debtDelta = Math.round((debt - avgDebt) * 10) / 10;
+    }
+
     return {
       nc: ncPercent,
       ec: ecPercent,
       complexity: analysisResults.complexity.cyclomaticComplexity,
       totalNodes: nodesCount,
       totalEdges: analysisResults.edges.length,
+      debt,
+      debtDelta,
     };
-  }, [analysisResults]);
+  }, [analysisResults, sessions]);
 
   const activeSelectedNodeObj = analysisResults?.nodes.find((n) => n.id === selectedNodeId) || null;
 
@@ -717,6 +752,13 @@ REQ-05: 안전 이체 내역 레지스트리 비휘발성 저장`,
                   직접 수정 후 수동 파싱을 가동하여 커버리지 노드를 증분 생성하십시오
                 </span>
               </div>
+              <div className="shrink-0 pb-3">
+                <LocalFileUploader
+                  onFileLoaded={(lang, fileName, fileCode) =>
+                    handleLocalFileLoaded(lang, fileName, fileCode)
+                  }
+                />
+              </div>
               <textarea
                 id="source-code-editor"
                 className="flex-1 w-full bg-[#080808] text-stone-200 font-mono text-xs leading-relaxed p-4 rounded-sm outline-hidden border border-[#222] transition-colors focus:border-[#A1824A]/40 resize-none overflow-auto"
@@ -763,12 +805,12 @@ REQ-05: 안전 이체 내역 레지스트리 비휘발성 저장`,
           <MetricCard
             id="failure-rate"
             title="소프트웨어 기술 부채 지수"
-            value="10.8 dS"
-            subValue="-5.2% 하락 추이"
+            value={`${stats.debt.toFixed(1)} dS`}
+            subValue={`세션 ${sessions.length}개 평균 대비 ${stats.debtDelta >= 0 ? "+" : ""}${stats.debtDelta.toFixed(1)} dS`}
             icon={ShieldAlert}
             themeColor="rose"
-            badgeText="안정 유지 중"
-            description="코드 Churn 대비 미커버 위험 노드 매핑 밀도를 종합 역산한 품질 부채 지합."
+            badgeText={stats.debt < 3 ? "안정 유지 중" : stats.debt < 6 ? "주시 필요" : "경고 임박"}
+            description="미커버 노드 비율과 순환 복잡도를 실측 역산한 품질 부채 지수입니다."
           />
         </section>
 
@@ -858,7 +900,10 @@ REQ-05: 안전 이체 내역 레지스트리 비휘발성 저장`,
               Lifecycle Erosion & Software Churn Analysis
             </h2>
           </div>
-          <TimeSeriesStats />
+          <TimeSeriesStats
+            sessions={sessions}
+            currentResults={analysisResults}
+          />
         </section>
 
       </main>

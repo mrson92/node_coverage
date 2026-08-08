@@ -143,3 +143,42 @@
 - `Dockerfile` [NEW]
 - `compose.yaml` [NEW]
 - `docs/EVIDENCE.md`
+
+---
+
+## IMP-005: TODO 백로그 항목 일괄 해소 (로컬 파일 선택/실측 지표/청크 분리) (2026-08-07)
+
+- **상태**: 완료
+- **날짜**: 2026-08-07
+- **작성자**: opencode
+- **개선 목표**: `docs/TODO.md` 백로그에 남아 있던 미해결 항목을 검증 후 일괄 해소한다.
+
+### 개선 내역
+
+| 항목 | 내용 |
+|------|------|
+| IMP-001 로컬 파일 선택/드래그앤드롭 | `LocalFileUploader.tsx` [NEW] + `utils/languageDetection.ts` [NEW]. 브라우저 파일 선택/드래그앤드롭으로 2MB 이하 소스를 로드하고 확장자 기반 언어 자동 판별(js/ts/jsx→javascript, py→python, java, c/cpp/h 등→cpp) 후 워크벤치에 주입. `src/App.tsx` Active Source Editor Block 상단에 배치 |
+| 기술 부채 지수 카드 하드코딩 | `App.tsx` stats memo에서 `debt`(미커버 노드 비율×10 + 복잡도 가중) 실측 계산. 기존 정적 `10.8 dS` 제거, 세션 평균 대비 delta 표기 및 badge(`안정/주시/경고`) 동적화 |
+| TimeSeriesStats 정적 mock | `TimeSeriesStats.tsx`를 `sessions`/`currentResults` 기반 데이터로 재작성. 저장된 분석 런 + 현재 워크스페이스 실측 포인트로 시계열/경보(Auditor)를 동적 생성. 세션 이력 부재 시에만 baseline 시나리오 폴백 |
+| AuthScreen 평문 보안 | 데모 비밀번호를 localStorage 평문 대신 **Web Crypto SHA-256 해시**로 저장/검증 (레거시 평문 자동 마이그레이션). 하단 푸터에 `데모 로컬 인증 v1.1`·운영 배포 시 백엔드 인증 교체 필요 명시 |
+| 빌드 청크 크기 경고 | `vite.config.ts`에 `manualChunks` vendor 분리(react/recharts/motion/lucide/misc). 메인 `index-*.js` 944 kB(gzip 284 kB) → 175 kB(gzip 48 kB) + vendor 청크 5종 캐시 분리 |
+| IntegrationConsultant 정적 endpoint | 생성되는 Blueprint의 하드코딩 `node-coverage-analyzer.internal` 호스트를 `window.location.origin` 기반 실 endpoint(`/api/analyze`, `/api`)로 교체 |
+
+### 검증 절차
+- [x] `npm run lint` (`tsc --noEmit`) → **TypeScript: No errors found**
+- [x] `npm run build` → 청크 분리 확인 (Circular chunk 경고 해소, `dist/server.cjs` 생성)
+- [x] `npm run dev` 스모크 테스트 → `/api/health` `{"status":"ok"}`, 루트 `HTTP 200`
+
+### 변경 파일
+- `src/components/LocalFileUploader.tsx` [NEW]
+- `src/utils/languageDetection.ts` [NEW]
+- `src/App.tsx`
+- `src/components/TimeSeriesStats.tsx`
+- `src/components/AuthScreen.tsx`
+- `src/components/IntegrationConsultant.tsx`
+- `vite.config.ts`
+- `docs/TODO.md`
+- `docs/EVIDENCE.md`
+
+### 결과 / 스크린샷
+- 빌드 산출물 청크: `vendor-recharts 252 kB`, `vendor-react 194 kB`, `vendor-motion 129 kB`, `vendor-misc 175 kB`, `vendor-lucide 25 kB`, `index 175 kB` (각각 별도 gzip/캐시)

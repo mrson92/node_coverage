@@ -23,6 +23,12 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
+// 생성된 Blueprint가 실제 구동 중인 앱 endpoint를 가리키도록 동적 origin 사용
+const APP_BASE =
+  typeof window !== "undefined" ? window.location.origin : "https://node-coverage-analyzer.example";
+const ANALYZE_ENDPOINT = `${APP_BASE}/api/analyze`;
+const API_ROOT = `${APP_BASE}/api`;
+
 interface Answer {
   q1: string | null; // Intake option
   q2: string | null; // Trigger option
@@ -188,7 +194,7 @@ jobs:
             -H "Content-Type: application/json" \\
             -H "X-Client-Secret: \${{ secrets.COVERAGE_ENGINE_SECRET }}" \\
             -d "{\\"code\\": \\"$(cat ./src/main.js | jq -sRr @uri)\\", \\"requirements\\": \\"$(cat ./rtm-specs.json | jq -sRr @uri)\\"}" \\
-            https://node-coverage-analyzer.internal/api/verify \\
+            ${ANALYZE_ENDPOINT} \\
             -o ./verification-report.json
 
       - name: Assert Target Gate Threshold
@@ -205,7 +211,7 @@ jobs:
     if (q1 === "VSCode") {
       return `// .vscode/settings.json
 {
-  "node-coverage.endpoint": "https://node-coverage-analyzer.internal/api",
+  "node-coverage.endpoint": "${API_ROOT}",
   "node-coverage.apiKey": "\${env:NODE_COVERAGE_SECRET}",
   "node-coverage.autoSync": ${q2 === "OnCommit" ? "true" : "false"},
   "node-coverage.specIntakeMode": "${q3.toLowerCase()}",
@@ -225,7 +231,7 @@ jobs:
 
 set -euo pipefail
 
-API_URL="https://node-coverage-analyzer.internal/api/verify"
+API_URL="${ANALYZE_ENDPOINT}"
 PROJECT_ID="prod-sdlc-integration-probe"
 REQ_TAGS="./rtm-specifications.txt"
 

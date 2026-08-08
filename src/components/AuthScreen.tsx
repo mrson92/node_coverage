@@ -58,18 +58,42 @@ const DEMO_PASSWORD = "demo1234";
 
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
 
-function loadUsers(): Record<string, AuthUser> {
+// Web Crypto SHA-256 해시. 비보안 컨텍스트에서는 평문 폴백(로컬 데모 전용).
+async function hashPassword(plain: string): Promise<string> {
+  if (typeof crypto !== "undefined" && crypto.subtle) {
+    try {
+      const data = new TextEncoder().encode(plain);
+      const digest = await crypto.subtle.digest("SHA-256", data);
+      return Array.from(new Uint8Array(digest))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+    } catch {
+      // fall through to plaintext compare on unsupported crypto contexts
+    }
+  }
+  return plain;
+}
+
+async function handleSeed(users: Record<string, AuthUser>): Promise<void> {
+  const demoHashed = await hashPassword(DEMO_PASSWORD);
+  const demo = users[DEMO_EMAIL];
+  // 평문 레거시 계정이거나 해시 아님 → 해시로 마이그레이션(재시드)
+  if (!demo || demo.password !== demoHashed || demo.password.length < 64) {
+    users[DEMO_EMAIL] = { password: demoHashed, name: "김데모", phone: "010-1234-5678" };
+    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+  }
+}
+
+async function loadUsers(): Promise<Record<string, AuthUser>> {
+  let users: Record<string, AuthUser> = {};
   try {
     const raw = localStorage.getItem(USERS_KEY);
-    if (raw) return JSON.parse(raw) as Record<string, AuthUser>;
+    if (raw) users = JSON.parse(raw) as Record<string, AuthUser>;
   } catch {
     // Ignore corrupted storage and re-seed below.
   }
-  const seed: Record<string, AuthUser> = {
-    [DEMO_EMAIL]: { password: DEMO_PASSWORD, name: "김데모", phone: "010-1234-5678" },
-  };
-  localStorage.setItem(USERS_KEY, JSON.stringify(seed));
-  return seed;
+  await handleSeed(users);
+  return users;
 }
 
 function maskEmail(email: string): string {
@@ -109,16 +133,17 @@ export function AuthScreen({ onLogin }: AuthScreenProps) {
     setFindError(null);
   };
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const users = loadUsers();
+    const users = await loadUsers();
 
     if (!EMAIL_RE.test(email)) {
       setLoginError("유효한 이메일 주소를 입력해 주세요.");
       return;
     }
+    const submittedHash = await hashPassword(password);
     const user = users[email.trim().toLowerCase()];
-    if (!user || user.password !== password) {
+    if (!user || user.password !== submittedHash) {
       setLoginError("이메일 또는 암호가 올바르지 않습니다.");
       return;
     }
@@ -136,9 +161,9 @@ export function AuthScreen({ onLogin }: AuthScreenProps) {
     }, 600);
   };
 
-  const handleResetSubmit = (e: React.FormEvent) => {
+  const handleResetSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const users = loadUsers();
+    const users = await loadUsers();
     const target = resetEmail.trim().toLowerCase();
 
     if (!EMAIL_RE.test(target)) {
@@ -153,9 +178,9 @@ export function AuthScreen({ onLogin }: AuthScreenProps) {
     setResetSent(true);
   };
 
-  const handleFindSubmit = (e: React.FormEvent) => {
+  const handleFindSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const users = loadUsers();
+    const users = await loadUsers();
     const found = Object.entries(users).find(
       ([, u]) => u.name === findName.trim() && u.phone === findPhone.trim()
     );
@@ -471,7 +496,7 @@ export function AuthScreen({ onLogin }: AuthScreenProps) {
       </Card>
 
       <p className="relative mt-6 text-[10px] text-gray-600 font-mono">
-        © 2026 Node Coverage Analyzer · 세션 인증 게이트웨이 v1.0
+        © 2026 Node Coverage Analyzer · 데모 로컬 인증 게이트웨이 v1.1 (비밀번호는 SHA-256 해시로 로컬 저장, 운영 배포 시 백엔드 인증으로 교체 필요)
       </p>
     </div>
   );
