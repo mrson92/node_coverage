@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { CFGNode } from "../types";
+import { CFGNode, OptimizationResult } from "../types";
 import { Sparkles, Play, ShieldAlert, Code2, Cpu, CheckCircle, RefreshCcw, FileText } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -9,12 +9,7 @@ interface AgenticOptimizerProps {
   language: string;
   isOptimizing: boolean;
   onRunOptimization: () => void;
-  optimizationResult: {
-    symbolicConstraints: string;
-    testInputs: Array<{ param: string; value: string; explanation: string }>;
-    unitTestCode: string;
-    autofixSuggestion: string;
-  } | null;
+  optimizationResult: OptimizationResult | null;
 }
 
 export function AgenticOptimizer({

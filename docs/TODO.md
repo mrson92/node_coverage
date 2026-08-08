@@ -24,6 +24,8 @@
 
 ## 완료 (Completed)
 
+- [x] **IMP-006: 백엔드 구조 분리 + 타입 공유 + 클라이언트 훅 리팩토링 + Git URL SSRF 방어** — `server.ts`→routes/services 분리, `src/types.ts` 공유 타입, `useAnalysisEngine.ts` 훅 신설, `assertSafeGitUrl` SSRF 방어. `docs/EVIDENCE.md` IMP-006 참조. (2026-08-08)
+
 - [x] **IMP-001: 로컬 파일 선택/드래그앤드롭** — `LocalFileUploader.tsx` + 확장자 기반 언어 자동 판별(`utils/languageDetection.ts`) 추가. `docs/EVIDENCE.md` IMP-005 참조. (2026-08-07)
 - [x] **기술 부채 지수 카드 하드코딩** — `src/App.tsx` stats memo에서 미커버 노드 비율+복잡도 기반 debt 실측 계산 + 세션 평균 대비 delta/badge 동적화. (2026-08-07)
 - [x] **TimeSeriesStats 정적 mock** — 세션 이력 + 현재 워크스페이스 실측 데이터 기반 시계열/경보로 재작성. 이력 부재 시에만 baseline 폴백. (2026-08-07)

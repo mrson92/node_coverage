@@ -47,3 +47,17 @@ export interface CodeTemplate {
   requirements: string;
   code: string;
 }
+
+// /api/analyze 응답과 동일한 서버 Gemini 스키마 계약 (server/services/gemini.ts)
+export interface OptimizationInput {
+  param: string;
+  value: string;
+  explanation: string;
+}
+
+export interface OptimizationResult {
+  symbolicConstraints: string;
+  testInputs: OptimizationInput[];
+  unitTestCode: string;
+  autofixSuggestion: string;
+}

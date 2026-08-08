@@ -182,3 +182,43 @@
 
 ### 결과 / 스크린샷
 - 빌드 산출물 청크: `vendor-recharts 252 kB`, `vendor-react 194 kB`, `vendor-motion 129 kB`, `vendor-misc 175 kB`, `vendor-lucide 25 kB`, `index 175 kB` (각각 별도 gzip/캐시)
+
+---
+
+## IMP-006: 백엔드 구조 분리 + 타입 공유 + 클라이언트 훅 리팩토링 + Git URL SSRF 방어 (2026-08-08)
+
+- **상태**: 완료
+- **날짜**: 2026-08-08
+- **작성자**: opencode
+- **개선 목표**: 모놀리식 `server.ts`를 라우트/서비스 계층으로 분리하고, Gemini 응답 스키마를 프론트 타입과 단일 소스로 공유하며, 900줄대 `App.tsx`의 상태/핸들러를 전용 훅으로 추출하고, Git URL 검증(SSRF 방어)을 추가한다.
+
+### 개선 내역
+
+| 항목 | 내용 |
+|------|------|
+| 서버 구조 분리 | `server.ts`는 부트스트랩만(dev/prod 호스팅, listen, `PORT` env 지원) 담당. `server/app.ts`의 `createApp()`이 미들웨어/라우팅을 구성, `/api/health`, `/api/analyze`, `/api/optimize`, `/api/repo/scan`, `/api/repo/file` 라우터(`server/routes/*`)를 마운트 |
+| Gemini 서비스 분리 | `server/services/gemini.ts`에 AI 클라이언트·`gemini-3.5-flash`·ANALYZE/OPTIMIZE 프롬프트·`responseSchema`·파싱 함수 `runAnalysisExtraction`/`runCoverageOptimization` 이관 |
+| 타입 단일화 | `src/types.ts`에 `OptimizationInput`/`OptimizationResult` 공유 타입 추가, `AgenticOptimizer.tsx`의 인라인 `any` 타입 대체. 프론트와 서버 스키마 계약이 한 파일에 정착 |
+| Git clone 서비스 | `server/services/repoClone.ts`의 `scanRepository`/`readRepoFile`/`ensureRepoCloned`로 이관 |
+| Git URL SSRF 방어 | `assertSafeGitUrl`: http/https 허용, URL 자격 증명 금지, 기본 포트(80/443) 외 차단, `dns.lookup` 후 공인 IP만 허용(IPv4/IPv6 사설·링크로컬·루프백·멀티캐스트 차단) |
+| 클라이언트 훅 추출 | `src/hooks/useAnalysisEngine.ts` [NEW]에 분석 상태/시뮬레이션 타이머/세션(localStorage)/API 호출 통합. `App.tsx`는 훅 소비만(뷰·JSX) 하도록 재작성, 외부 소스(Git/로컬 파일) 주입은 `handleExternalSource` 하나로 통합 |
+
+### 검증 절차
+- [x] `npm run lint` (`tsc --noEmit`) → **TypeScript: No errors found**
+- [x] `npm run dev` 스모크 → `/api/health` `{"status":"ok"}`, 루트 `HTTP 200`
+- [x] SSRF 차단 확인: `127.0.0.1`/`10.0.0.5`/`localhost` URL → "사설/로컬 주소… 허용되지 않음", 자격 증명 포함 URL → "자격 증명 포함 불가"
+- [x] 공개 repo 실제 클론·스캔: `octocat/Hello-World` → `fileCount:1`, `entryCandidates:["README"]` 정상 반환
+
+### 변경 파일
+- `server.ts` (부트스트랩 리팩토링)
+- `server/app.ts` [NEW], `server/routes/analyze.ts` [NEW], `server/routes/optimize.ts` [NEW], `server/routes/repo.ts` [NEW]
+- `server/services/gemini.ts` [NEW], `server/services/repoClone.ts` [NEW]
+- `src/hooks/useAnalysisEngine.ts` [NEW]
+- `src/App.tsx` (훅 소비형으로 재작성)
+- `src/types.ts`, `src/components/AgenticOptimizer.tsx`
+- `docs/TODO.md`, `docs/EVIDENCE.md`
+
+### 결과 / 스크린샷
+- `server/routes/*` 3개 + `server/services/*` 2개 + `server/app.ts` 신설로 기존 모놀리식 `server.ts`의 책임이 분산됨
+- `src/hooks/useAnalysisEngine.ts`(약 480줄) 신설, `src/App.tsx`는 JSX 중점으로 축소
+- SSRF 검증 로그: private/loopback URL은 차단되고, 공인 Git URL은 클론/스캔 성공
