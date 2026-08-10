@@ -13,7 +13,7 @@
 
 ## IMP-001: 소스 선택 방식 개선
 
-- **상태**: 진행 중
+- **상태**: 완료
 - **날짜**: 2026-08-04
 - **작성자**: opencode
 - **개선 목표**: 소스를 선택하는 방법을 개선한다.
@@ -33,20 +33,22 @@
 3. 선택한 소스의 **언어 자동 판별** 기능이 없음 (언어를 수동 지정해야 함)
 
 ### 개선 방향 (To-Be)
-- [ ] 실제 로컬 파일 선택 수단 제공 (브라우저 파일 선택 + 드래그앤드롭)
-- [ ] 선택한 파일의 언어 자동 판별
-- [ ] (선택) 실제 Git 저장소 연동 또는 기존 가상 스캔과의 명확한 구분
+- [x] 실제 로컬 파일 선택 수단 제공 (브라우저 파일 선택 + 드래그앤드롭) — IMP-005에서 `LocalFileUploader.tsx` 구현
+- [x] 선택한 파일의 언어 자동 판별 — IMP-005에서 `utils/languageDetection.ts` 구현
+- [x] 실제 Git 저장소 연동 또는 기존 가상 스캔과의 명확한 구분 — IMP-006/007에서 리얼 `/api/repo/*` 연동으로 전환
 
 ### 검증 절차
-- [ ] (예정) 개선 UI에서 로컬 파일 선택 시 editor에 코드 로드 확인
-- [ ] (예정) 언어 자동 판별 결과 확인
-- [ ] (예정) `npm run lint` 통과
+- [x] 개선 UI에서 로컬 파일 선택 시 editor에 코드 로드 확인 (IMP-005)
+- [x] 언어 자동 판별 결과 확인 (IMP-005)
+- [x] `npm run lint` 통과 (IMP-005)
 
 ### 변경 파일
-- (작성 예정)
+- `src/components/LocalFileUploader.tsx`, `src/utils/languageDetection.ts`, `src/App.tsx`
+- `src/components/MultiFileGitAnalyzer.tsx`, `src/hooks/useAnalysisEngine.ts`
+- `server/services/repoClone.ts`, `server/routes/repo.ts`
 
 ### 결과 / 스크린샷
-- (작성 예정)
+- 가상 스캔 시뮬레이션에서 실제 원격 저장소 shallow-clone + 배치 분석(`/api/analyze/batch`)으로 전환 완료. 본 항목은 IMP-005~007에서 세분 구현되어 완료 처리함.
 
 ---
 
